@@ -4,6 +4,7 @@ import pytest
 from datetime import datetime
 
 from bot.models.user_book import BookStatus, UserBook
+from bot.services.mongo_service import without_mongo_id
 
 
 def test_user_book_enum():
@@ -54,6 +55,18 @@ def test_user_book_status_enum():
         status=BookStatus.READING
     )
     assert ub.status == BookStatus.READING
+
+
+def test_mongo_documents_exclude_internal_id_before_model_validation():
+    document = {
+        "_id": "database-only-id",
+        "user_id": 12345,
+        "book_id": "test_book_id",
+    }
+
+    user_book = UserBook(**without_mongo_id(document))
+
+    assert user_book.user_id == 12345
 
 
 if __name__ == "__main__":

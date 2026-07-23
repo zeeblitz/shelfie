@@ -12,6 +12,11 @@ from bot.config import get_settings
 logger = get_logger()
 
 
+def without_mongo_id(document: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove MongoDB's internal identifier from application data."""
+    return {key: value for key, value in document.items() if key != "_id"}
+
+
 class MongoService:
     """Service class for MongoDB operations."""
 
@@ -52,7 +57,8 @@ class MongoService:
         """Find a single document."""
         try:
             coll = await self.get_collection(collection)
-            return await coll.find_one(filter, projection)
+            document = await coll.find_one(filter, projection)
+            return without_mongo_id(document) if document else None
         except OperationFailure as e:
             logger.error("Failed to find document", collection=collection, error=str(e))
             raise
@@ -73,7 +79,8 @@ class MongoService:
                 cursor = cursor.sort(sort)
             if limit:
                 cursor = cursor.limit(limit)
-            return await cursor.to_list(length=limit)
+            documents = await cursor.to_list(length=limit)
+            return [without_mongo_id(document) for document in documents]
         except OperationFailure as e:
             logger.error("Failed to find documents", collection=collection, error=str(e))
             raise
