@@ -30,6 +30,7 @@ class BookSearchResult(BaseModel):
     id: str = Field(..., description="Google Books ID")
     title: str = Field(..., description="Book title")
     authors: List[str] = Field(..., description="List of authors")
+    publisher: Optional[str] = Field(None, description="Book publisher")
     description: Optional[str] = Field(None, description="Book description")
     page_count: Optional[int] = Field(None, description="Total pages")
     published_date: Optional[str] = Field(None, description="Publication date")
@@ -103,6 +104,7 @@ class GoogleBooksService:
                 continue
 
             authors = volume.get("authors", [])
+            publisher = volume.get("publisher")
             description = volume.get("description")
             page_count = volume.get("pageCount")
             published_date = volume.get("publishedDate")
@@ -115,6 +117,7 @@ class GoogleBooksService:
                 "id": book_id,
                 "title": volume.get("title", ""),
                 "authors": authors,
+                "publisher": publisher,
                 "description": description,
                 "page_count": page_count,
                 "published_date": published_date,
@@ -166,6 +169,7 @@ class GoogleBooksService:
         if not volume:
             return {}
         authors = volume.get("authors", [])
+        publisher = volume.get("publisher")
         description = volume.get("description")
         page_count = volume.get("pageCount")
         published_date = volume.get("publishedDate")
@@ -178,6 +182,7 @@ class GoogleBooksService:
             "id": data.get("id", book_id),
             "title": volume.get("title", ""),
             "authors": authors,
+            "publisher": publisher,
             "description": description,
             "page_count": page_count,
             "published_date": published_date,

@@ -1,5 +1,7 @@
 """Book-related slash commands for Shelfie bot."""
 
+from typing import Any, Dict, List
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -13,6 +15,46 @@ from bot.utils.cache import Cache
 
 cache = Cache()
 book_service = GoogleBooksService(cache)
+
+
+def _truncate(text: str, length: int = 100) -> str:
+    """Limit text to Discord select-option field limits."""
+    return text if len(text) <= length else f"{text[: length - 1]}…"
+
+
+def create_book_options(results: List[Dict[str, Any]]) -> List[discord.SelectOption]:
+    """Create dropdown options that retain each result's hidden Google Books ID."""
+    options = []
+    for book in results:
+        title = _truncate(book.get("title") or "Untitled")
+        authors = ", ".join(book.get("authors", [])) or "Unknown author"
+        options.append(
+            discord.SelectOption(
+                label=title,
+                description=_truncate(authors),
+                value=book["id"],
+            )
+        )
+    return options
+
+
+class SearchResultsView(discord.ui.View):
+    """Dropdown that lets a user add a result directly from a search."""
+
+    def __init__(self, cog: "BookCommands", results: List[Dict[str, Any]]):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.book_select = discord.ui.Select(
+            placeholder="Choose a book to add to your library…",
+            options=create_book_options(results),
+        )
+        self.book_select.callback = self._add_selected_book
+        self.add_item(self.book_select)
+
+    async def _add_selected_book(self, interaction: discord.Interaction) -> None:
+        """Add the book selected in the dropdown."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.cog.add_book_to_library(interaction, self.book_select.values[0])
 
 
 class BookCommands(
@@ -51,17 +93,22 @@ class BookCommands(
 
             for i, book in enumerate(results, 1):
                 authors = ", ".join(book.get("authors", [])) or "Unknown"
-                pages = book.get("page_count", "Unknown")
+                pages = book.get("page_count") or "Unknown"
+                publisher = book.get("publisher") or "Unknown"
                 embed.add_field(
                     name=f"{i}. {book['title']}",
                     value=(
                         f"by {authors} • {pages} pages\n"
-                        f"Book ID: `{book['id']}`"
+                        f"Publisher: {publisher}"
                     ),
                     inline=False
                 )
 
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(
+                embed=embed,
+                view=SearchResultsView(self, results),
+                ephemeral=True,
+            )
 
         except Exception as e:
             logger.error("Search error", error=str(e), user_id=interaction.user.id)
@@ -79,6 +126,12 @@ class BookCommands(
     async def add(self, interaction: discord.Interaction, book_id: str) -> None:
         """Add a book to the user's library."""
         await interaction.response.defer(ephemeral=True)
+        await self.add_book_to_library(interaction, book_id)
+
+    async def add_book_to_library(
+        self, interaction: discord.Interaction, book_id: str
+    ) -> None:
+        """Add a book by ID after an interaction response has been deferred."""
 
         try:
             # Get book details

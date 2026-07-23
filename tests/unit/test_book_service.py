@@ -34,6 +34,7 @@ async def test_get_book_details_uses_volume_id_path():
                 "volumeInfo": {
                     "title": "Example Book",
                     "authors": ["Example Author"],
+                    "publisher": "Example Press",
                 },
             },
         )
@@ -46,4 +47,5 @@ async def test_get_book_details_uses_volume_id_path():
 
     assert details["id"] == "SJnHBAAAQBAJ"
     assert details["title"] == "Example Book"
+    assert details["publisher"] == "Example Press"
     await service.close()

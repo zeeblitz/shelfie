@@ -12,6 +12,7 @@ class Book(BaseModel):
     id: str = Field(..., description="Google Books ID")
     title: str = Field(..., description="Book title")
     authors: List[str] = Field(..., description="List of book authors")
+    publisher: Optional[str] = Field(None, description="Book publisher")
     description: Optional[str] = Field(None, description="Book description")
     page_count: Optional[int] = Field(None, description="Total number of pages")
     published_date: Optional[str] = Field(None, description="Publication date")
