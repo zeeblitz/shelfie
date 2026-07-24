@@ -55,6 +55,8 @@ Shelfie is a lightweight, Discord-native book tracking bot. It allows members of
    - `DISCORD_TOKEN`: Your bot token.
    - `MONGODB_URI`: Your MongoDB Atlas connection string.
    - `GOOGLE_BOOKS_API_KEY`: (Optional) Your Google Books API key.
+   - `COMMAND_RESPONSES_EPHEMERAL`: Set to `false` to make command responses
+     visible to everyone while testing (defaults to `true`).
 
 4. **Run the bot:**
    ```bash
@@ -70,7 +72,9 @@ Shelfie is a lightweight, Discord-native book tracking bot. It allows members of
 
 ### User Commands
 - `/user list`: List your books.
-- `/user progress <book_id> <page>`: Update your reading progress.
+- `/user progress`: Choose a book, then enter the current page.
+- `/user page-count`: Choose a book, then set your edition's page count.
+- `/user progress-percent`: Choose a book, then enter progress as a percentage.
 - `/user stats`: View your reading statistics.
 
 ### Configuration Commands
