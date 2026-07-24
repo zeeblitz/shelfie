@@ -22,6 +22,9 @@ class UserBook(BaseModel):
     book_id: str = Field(..., description="Google Books ID")
     status: BookStatus = Field(default=BookStatus.WANT_TO_READ)
     current_page: int = Field(default=0, ge=0)
+    page_count: Optional[int] = Field(
+        None, ge=1, description="Page count for the user's edition"
+    )
     rating: Optional[int] = Field(None, ge=1, le=5)
     started_at: Optional[datetime] = Field(None)
     completed_at: Optional[datetime] = Field(None)

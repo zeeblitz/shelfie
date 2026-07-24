@@ -7,8 +7,11 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.config import get_settings
 from bot.logging import logger
 from bot.services.mongo_service import MongoService
+
+COMMAND_RESPONSES_EPHEMERAL = get_settings().COMMAND_RESPONSES_EPHEMERAL
 
 
 class ConfigCommands(
@@ -28,7 +31,7 @@ class ConfigCommands(
         channel: Optional[discord.TextChannel] = None
     ) -> None:
         """Set or clear the reading feed channel for this server."""
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
         try:
             guild_id = interaction.guild.id
@@ -45,7 +48,7 @@ class ConfigCommands(
                         description="Reading feed has been disabled for this server.",
                         color=discord.Color.orange()
                     ),
-                    ephemeral=True
+                    ephemeral=COMMAND_RESPONSES_EPHEMERAL
                 )
                 return
 
@@ -69,7 +72,7 @@ class ConfigCommands(
                     description=f"Reading feed will now be posted to {channel.mention}",
                     color=discord.Color.green()
                 ),
-                ephemeral=True
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
         except Exception as e:
@@ -80,10 +83,11 @@ class ConfigCommands(
                     description="Failed to set feed channel. Please try again later.",
                     color=discord.Color.red()
                 ),
-                ephemeral=True
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
 
 async def setup(bot: commands.Bot) -> None:
     """Load the cog."""
     await bot.add_cog(ConfigCommands(bot))
+

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     FEED_RATE_LIMIT_SECONDS: int = Field(
         default=3600, description="Rate limit for feed posts in seconds"
     )
+    COMMAND_RESPONSES_EPHEMERAL: bool = Field(
+        default=True, description="Whether slash-command responses are private"
+    )
 
     # Health Check Server
     HEALTH_HOST: str = Field(default="0.0.0.0", description="Health check host")

@@ -22,6 +22,7 @@ def test_user_book_defaults():
     assert ub.book_id == "test_book_id"
     assert ub.status == BookStatus.WANT_TO_READ
     assert ub.current_page == 0
+    assert ub.page_count is None
     assert ub.rating is None
     assert ub.started_at is None
     assert ub.completed_at is None
@@ -45,6 +46,9 @@ def test_user_book_validation():
             book_id="test_book_id", 
             rating=6  # Invalid rating
         )
+
+    with pytest.raises(ValueError):
+        UserBook(user_id=12345, book_id="test_book_id", page_count=0)
 
 
 def test_user_book_status_enum():

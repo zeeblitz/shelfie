@@ -7,7 +7,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.config import get_settings
 from bot.logging import logger
+
+COMMAND_RESPONSES_EPHEMERAL = get_settings().COMMAND_RESPONSES_EPHEMERAL
 
 
 async def on_app_command_error(
@@ -28,23 +31,23 @@ async def on_app_command_error(
     if isinstance(error, app_commands.CommandOnCooldown):
         await interaction.response.send_message(
             f"⏳ This command is on cooldown. Try again in {error.retry_after:.2f} seconds.",
-            ephemeral=True
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL
         )
     elif isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message(
             "❌ You don't have permission to use this command.",
-            ephemeral=True
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL
         )
     elif isinstance(error, app_commands.BotMissingPermissions):
         await interaction.response.send_message(
             "❌ I don't have the required permissions to execute this command.",
-            ephemeral=True
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL
         )
     else:
         # Generic error
         await interaction.response.send_message(
             "❌ An unexpected error occurred. Please try again later.",
-            ephemeral=True
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL
         )
 
 

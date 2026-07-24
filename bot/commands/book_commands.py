@@ -6,11 +6,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.config import get_settings
 from bot.logging import logger
 from bot.models.book import Book
 from bot.models.user_book import BookStatus, UserBook
 from bot.services.book_service import GoogleBooksService
 from bot.services.mongo_service import MongoService
+
+COMMAND_RESPONSES_EPHEMERAL = get_settings().COMMAND_RESPONSES_EPHEMERAL
 from bot.utils.cache import Cache
 
 cache = Cache()
@@ -53,7 +56,7 @@ class SearchResultsView(discord.ui.View):
 
     async def _add_selected_book(self, interaction: discord.Interaction) -> None:
         """Add the book selected in the dropdown."""
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL, thinking=True)
         await self.cog.add_book_to_library(interaction, self.book_select.values[0])
 
 
@@ -70,7 +73,7 @@ class BookCommands(
     @app_commands.describe(query="Search query (title, author, or ISBN)")
     async def search(self, interaction: discord.Interaction, query: str) -> None:
         """Search for books using Google Books API."""
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
         try:
             results = await book_service.search_books(query, max_results=5)
@@ -81,7 +84,7 @@ class BookCommands(
                         description=f"No books found for '{query}'. Try a different search term.",
                         color=discord.Color.red()
                     ),
-                    ephemeral=True
+                    ephemeral=COMMAND_RESPONSES_EPHEMERAL
                 )
                 return
 
@@ -107,7 +110,7 @@ class BookCommands(
             await interaction.followup.send(
                 embed=embed,
                 view=SearchResultsView(self, results),
-                ephemeral=True,
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
             )
 
         except Exception as e:
@@ -118,14 +121,14 @@ class BookCommands(
                     description="Failed to search for books. Please try again later.",
                     color=discord.Color.red()
                 ),
-                ephemeral=True
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
     @app_commands.command(name="add", description="Add a book to your library")
     @app_commands.describe(book_id="Google Books ID (from /search)")
     async def add(self, interaction: discord.Interaction, book_id: str) -> None:
         """Add a book to the user's library."""
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         await self.add_book_to_library(interaction, book_id)
 
     async def add_book_to_library(
@@ -143,7 +146,7 @@ class BookCommands(
                         description="Book not found. Please verify the book ID.",
                         color=discord.Color.red()
                     ),
-                    ephemeral=True
+                    ephemeral=COMMAND_RESPONSES_EPHEMERAL
                 )
                 return
 
@@ -167,7 +170,7 @@ class BookCommands(
                         description=f"'{book_data['title']}' is already in your library.",
                         color=discord.Color.orange()
                     ),
-                    ephemeral=True
+                    ephemeral=COMMAND_RESPONSES_EPHEMERAL
                 )
                 return
 
@@ -194,7 +197,7 @@ class BookCommands(
                     description=f"'{book_data['title']}' has been added to your library!",
                     color=discord.Color.green()
                 ),
-                ephemeral=True
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
         except Exception as e:
@@ -205,10 +208,11 @@ class BookCommands(
                     description="Failed to add book. Please try again later.",
                     color=discord.Color.red()
                 ),
-                ephemeral=True
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
 
 async def setup(bot: commands.Bot) -> None:
     """Load the cog."""
     await bot.add_cog(BookCommands(bot))
+
