@@ -73,8 +73,9 @@ Shelfie is a lightweight, Discord-native book tracking bot. It allows members of
 ### User Commands
 - `/user list`: List your books.
 - `/user progress`: Choose a book, then enter the current page.
-- `/user page-count`: Choose a book, then set your edition's page count.
+- `/user edition-pages`: Choose a book, then set your edition's page count.
 - `/user progress-percent`: Choose a book, then enter progress as a percentage.
+- `/user remove`: Choose and confirm removal of a book from your library.
 - `/user stats`: View your reading statistics.
 
 ### Configuration Commands

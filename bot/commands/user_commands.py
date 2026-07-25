@@ -13,6 +13,161 @@ from bot.models.user_book import BookStatus, UserBook
 from bot.services.mongo_service import MongoService
 
 COMMAND_RESPONSES_EPHEMERAL = get_settings().COMMAND_RESPONSES_EPHEMERAL
+BOOKS_PER_PAGE = 5
+
+
+def create_library_embed(
+    entries: list[dict], display_name: str, page: int, total_pages: int
+) -> discord.Embed:
+    """Render one page of a user's library."""
+    embed = discord.Embed(
+        title=f"{display_name}'s Library", color=discord.Color.blue()
+    )
+    status_emoji = {
+        BookStatus.WANT_TO_READ: "📖",
+        BookStatus.READING: "📚",
+        BookStatus.COMPLETED: "✅",
+        BookStatus.DNF: "❌",
+    }
+    for entry in entries:
+        status = entry["status"]
+        embed.add_field(
+            name=f"{status_emoji.get(status, '❓')} {entry['title']}",
+            value=(
+                f"Status: {status.value.replace('_', ' ').title()} • "
+                f"Page: {entry['current_page']} / {entry['page_count'] or 'Unknown'}"
+            ),
+            inline=False,
+        )
+    embed.set_footer(text=f"Page {page + 1} of {total_pages}")
+    return embed
+
+
+class LibraryPaginationView(discord.ui.View):
+    """Previous/next controls for a compact library listing."""
+
+    def __init__(self, entries: list[dict], display_name: str):
+        super().__init__(timeout=300)
+        self.entries = entries
+        self.display_name = display_name
+        self.page = 0
+        self.total_pages = max(1, (len(entries) + BOOKS_PER_PAGE - 1) // BOOKS_PER_PAGE)
+        self._sync_buttons()
+
+    def _sync_buttons(self) -> None:
+        """Disable navigation buttons at the start and end of the list."""
+        for child in self.children:
+            if child.custom_id == "library_previous":
+                child.disabled = self.page == 0
+            elif child.custom_id == "library_next":
+                child.disabled = self.page == self.total_pages - 1
+
+    def current_embed(self) -> discord.Embed:
+        """Return the embed for the currently selected page."""
+        start = self.page * BOOKS_PER_PAGE
+        return create_library_embed(
+            self.entries[start : start + BOOKS_PER_PAGE],
+            self.display_name,
+            self.page,
+            self.total_pages,
+        )
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, custom_id="library_previous")
+    async def previous_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        self.page = max(0, self.page - 1)
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, custom_id="library_next")
+    async def next_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        self.page = min(self.total_pages - 1, self.page + 1)
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+
+class LibraryRemoveSelectView(discord.ui.View):
+    """Book selector that leads to a removal confirmation."""
+
+    def __init__(self, cog: "UserCommands", user_id: int, entries: list[dict]):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+        self.entries = {entry["book_id"]: entry for entry in entries[:25]}
+        self.book_select = discord.ui.Select(
+            placeholder="Choose a book to remove…",
+            options=[
+                discord.SelectOption(
+                    label=entry["title"][:100],
+                    description=f"{entry['status'].value.replace('_', ' ').title()} • Page {entry['current_page']}"[:100],
+                    value=entry["book_id"],
+                )
+                for entry in self.entries.values()
+            ],
+        )
+        self.book_select.callback = self._select_book
+        self.add_item(self.book_select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who opened this list can remove a book.", ephemeral=True
+        )
+        return False
+
+    async def _select_book(self, interaction: discord.Interaction) -> None:
+        book_id = self.book_select.values[0]
+        entry = self.entries[book_id]
+        await interaction.response.edit_message(
+            content=f"Remove **{entry['title']}** from your library?",
+            view=LibraryRemoveConfirmView(self.cog, self.user_id, entry),
+        )
+
+
+class LibraryRemoveConfirmView(discord.ui.View):
+    """Confirmation controls for removing a library entry."""
+
+    def __init__(self, cog: "UserCommands", user_id: int, entry: dict):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.user_id = user_id
+        self.entry = entry
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who opened this list can remove a book.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger)
+    async def remove_book(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.defer(
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL, thinking=True
+        )
+        await self.cog.mongo_service.delete_one(
+            "user_books",
+            {"user_id": self.user_id, "book_id": self.entry["book_id"]},
+        )
+        await interaction.followup.send(
+            f"Removed '{self.entry['title']}' from your library.",
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.edit_message(
+            content="Removal cancelled.", view=None
+        )
 
 
 class LibraryBookSelectView(discord.ui.View):
@@ -47,7 +202,7 @@ class LibraryBookValueModal(discord.ui.Modal):
     ):
         labels = {
             "progress": ("Update progress", "Current page", "e.g. 120"),
-            "page_count": ("Set edition page count", "Total pages", "e.g. 320"),
+            "edition_pages": ("Set edition page count", "Total pages", "e.g. 320"),
             "progress_percent": ("Update percentage progress", "Percentage", "e.g. 37.5"),
         }
         title, label, placeholder = labels[action]
@@ -116,6 +271,31 @@ class UserCommands(
             return None
         return book_doc, user_book_doc
 
+    async def _library_entries(self, user_id: int, status: Optional[BookStatus] = None) -> list[dict]:
+        """Load display-ready library entries for one user."""
+        query = {"user_id": user_id}
+        if status:
+            query["status"] = status.value
+        user_books = await self.mongo_service.find_many(
+            "user_books", query, sort=[("updated_at", -1)]
+        )
+        entries = []
+        for user_book_data in user_books:
+            user_book = UserBook(**user_book_data)
+            book = await self.mongo_service.find_one(
+                "books", {"id": user_book.book_id}
+            )
+            entries.append(
+                {
+                    "book_id": user_book.book_id,
+                    "title": (book or {}).get("title", "Unknown Book"),
+                    "status": user_book.status,
+                    "current_page": user_book.current_page,
+                    "page_count": self._page_count(user_book_data, book or {}),
+                }
+            )
+        return entries
+
     async def _show_book_selector(
         self, interaction: discord.Interaction, action: str
     ) -> None:
@@ -160,7 +340,7 @@ class UserCommands(
         """Run a dropdown-selected progress or edition action."""
         if action == "progress":
             await self._update_progress_by_page(interaction, book_id, int(value))
-        elif action == "page_count":
+        elif action == "edition_pages":
             await self._set_page_count(interaction, book_id, int(value))
         elif action == "progress_percent":
             await self._update_progress_by_percent(interaction, book_id, value)
@@ -275,7 +455,7 @@ class UserCommands(
         total_pages = self._page_count(user_book_doc, book_doc)
         if not total_pages:
             await interaction.followup.send(
-                "Set your edition's page count with `/user page-count` first.",
+                "Set your edition's page count with `/user edition-pages` first.",
                 ephemeral=COMMAND_RESPONSES_EPHEMERAL,
             )
             return
@@ -303,13 +483,9 @@ class UserCommands(
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
         try:
-            query = {"user_id": interaction.user.id}
-            if status:
-                query["status"] = status.value
+            entries = await self._library_entries(interaction.user.id, status)
 
-            user_books = await self.mongo_service.find_many("user_books", query)
-
-            if not user_books:
+            if not entries:
                 await interaction.followup.send(
                     embed=discord.Embed(
                         title="Your Library",
@@ -320,37 +496,12 @@ class UserCommands(
                 )
                 return
 
-            embed = discord.Embed(
-                title=f"{interaction.user.display_name}'s Library",
-                color=discord.Color.blue()
+            view = LibraryPaginationView(entries, interaction.user.display_name)
+            await interaction.followup.send(
+                embed=view.current_embed(),
+                view=view if view.total_pages > 1 else None,
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
             )
-
-            for ub_data in user_books:
-                # Convert dict to UserBook model
-                ub = UserBook(**ub_data)
-                
-                # Fetch book details to get title
-                book_doc = await self.mongo_service.find_one("books", {"id": ub.book_id})
-                book_title = book_doc.get("title", "Unknown Book") if book_doc else "Unknown Book"
-                total_pages = self._page_count(ub_data, book_doc or {})
-                
-                status_emoji = {
-                    BookStatus.WANT_TO_READ: "📖",
-                    BookStatus.READING: "📚",
-                    BookStatus.COMPLETED: "✅",
-                    BookStatus.DNF: "❌"
-                }.get(ub.status, "❓")
-
-                embed.add_field(
-                    name=f"{status_emoji} {book_title}",
-                    value=(
-                        f"Status: {ub.status.value} • Page: {ub.current_page}"
-                        f" / {total_pages or 'Unknown'}"
-                    ),
-                    inline=False
-                )
-
-            await interaction.followup.send(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
         except Exception as e:
             logger.error("List books error", error=str(e), user_id=interaction.user.id)
@@ -376,17 +527,47 @@ class UserCommands(
             await interaction.followup.send("An error occurred while updating progress.", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
     @app_commands.command(
-        name="page-count", description="Set the page count for your edition"
+        name="edition-pages", description="Set the page count for your edition"
     )
-    async def set_page_count(self, interaction: discord.Interaction) -> None:
+    async def set_edition_pages(self, interaction: discord.Interaction) -> None:
         """Choose a book, then set the page count for the user's edition."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         try:
-            await self._show_book_selector(interaction, "page_count")
+            await self._show_book_selector(interaction, "edition_pages")
         except Exception as e:
             logger.error("Set page count error", error=str(e), user_id=interaction.user.id)
             await interaction.followup.send(
                 "Failed to update the page count.", ephemeral=COMMAND_RESPONSES_EPHEMERAL
+            )
+
+    @app_commands.command(name="remove", description="Remove a book from your library")
+    async def remove_book(self, interaction: discord.Interaction) -> None:
+        """Choose and confirm removal of one book from the user's library."""
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        try:
+            entries = await self._library_entries(interaction.user.id)
+            if not entries:
+                await interaction.followup.send(
+                    "You haven't added any books yet.",
+                    ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+                )
+                return
+            suffix = (
+                " Showing the 25 most recently updated books."
+                if len(entries) > 25
+                else ""
+            )
+            await interaction.followup.send(
+                f"Choose a book to remove from your library.{suffix}",
+                view=LibraryRemoveSelectView(self, interaction.user.id, entries),
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+        except Exception as error:
+            logger.error(
+                "Remove book error", error=str(error), user_id=interaction.user.id
+            )
+            await interaction.followup.send(
+                "Failed to load your library.", ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
     @app_commands.command(
@@ -437,4 +618,3 @@ class UserCommands(
 async def setup(bot: commands.Bot) -> None:
     """Load the cog."""
     await bot.add_cog(UserCommands(bot))
-
