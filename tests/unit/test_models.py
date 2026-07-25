@@ -50,6 +50,9 @@ def test_user_book_validation():
     with pytest.raises(ValueError):
         UserBook(user_id=12345, book_id="test_book_id", page_count=0)
 
+    with pytest.raises(ValueError):
+        UserBook(user_id=12345, book_id="test_book_id", review="x" * 2001)
+
 
 def test_user_book_status_enum():
     """Test UserBook status assignment."""

@@ -69,6 +69,11 @@ Shelfie is a lightweight, Discord-native book tracking bot. It allows members of
 - `/book search <query>`: Search for books on Google Books, then select a result
   from the dropdown to add it to your library.
 - `/book add <book_id>`: Add a book by its Google Books ID (optional fallback).
+- `/book info`: Choose a library book to view its metadata and community rating.
+- `/book review`: Choose a completed book to add or edit a rating and review.
+- `/book rating`: Choose a completed book to add or edit a 1–5 star rating.
+- `/book delete-review`: Choose one of your reviewed books to delete its review.
+- `/book reviews`: Choose a library book to view community ratings and reviews.
 
 ### User Commands
 - `/user list`: List your books.

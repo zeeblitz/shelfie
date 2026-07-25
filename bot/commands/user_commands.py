@@ -402,12 +402,23 @@ class UserCommands(
             interaction, book_id, user_book_doc, page, total_pages
         ):
             return
+        completed_now = (
+            bool(total_pages)
+            and page >= total_pages
+            and user_book_doc.get("status") != BookStatus.COMPLETED.value
+        )
+        review_view = None
+        if completed_now:
+            from bot.commands.book_commands import ReviewPromptView
+
+            review_view = ReviewPromptView(self.bot.get_cog("BookCommands"), book_id, book_doc["title"])
         await interaction.followup.send(
             embed=discord.Embed(
                 title="Progress Updated",
                 description=f"Updated progress for '{book_doc['title']}' to page {page}.",
                 color=discord.Color.green(),
             ),
+            view=review_view,
             ephemeral=COMMAND_RESPONSES_EPHEMERAL,
         )
 
@@ -464,11 +475,21 @@ class UserCommands(
             interaction, book_id, user_book_doc, page, total_pages
         ):
             return
+        completed_now = (
+            page >= total_pages
+            and user_book_doc.get("status") != BookStatus.COMPLETED.value
+        )
+        review_view = None
+        if completed_now:
+            from bot.commands.book_commands import ReviewPromptView
+
+            review_view = ReviewPromptView(self.bot.get_cog("BookCommands"), book_id, book_doc["title"])
         await interaction.followup.send(
             (
                 f"Updated progress for '{book_doc['title']}' to {percentage:g}% "
                 f"(page {page} of {total_pages})."
             ),
+            view=review_view,
             ephemeral=COMMAND_RESPONSES_EPHEMERAL,
         )
 

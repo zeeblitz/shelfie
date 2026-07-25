@@ -163,6 +163,95 @@ class BookPreviewView(discord.ui.View):
         )
 
 
+class ReviewModal(discord.ui.Modal):
+    """Create or update a completed reader's rating and optional review."""
+
+    def __init__(self, cog: "BookCommands", book_id: str, title: str):
+        super().__init__(title="Rate this book")
+        self.cog = cog
+        self.book_id = book_id
+        self.book_title = title
+        self.rating_input = discord.ui.TextInput(
+            label="Rating (1–5 stars)", placeholder="e.g. 4", max_length=1
+        )
+        self.review_input = discord.ui.TextInput(
+            label="Review (optional)", style=discord.TextStyle.paragraph,
+            placeholder="What did you think?", required=False, max_length=2000,
+        )
+        self.add_item(self.rating_input)
+        self.add_item(self.review_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            rating = int(self.rating_input.value)
+            if not 1 <= rating <= 5:
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message(
+                "Rating must be a whole number from 1 to 5.",
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+            return
+        await interaction.response.defer(
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL, thinking=True
+        )
+        saved = await self.cog.save_review(
+            interaction, self.book_id, rating, self.review_input.value.strip() or None
+        )
+        if saved:
+            await interaction.followup.send(
+                f"Saved your {rating}★ rating for '{self.book_title}'.",
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+
+
+class ReviewPromptView(discord.ui.View):
+    """Optional rating prompt presented after completion."""
+
+    def __init__(self, cog: "BookCommands", book_id: str, title: str):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.book_id = book_id
+        self.book_title = title
+
+    @discord.ui.button(label="Rate this book", style=discord.ButtonStyle.primary)
+    async def rate(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.send_modal(
+            ReviewModal(self.cog, self.book_id, self.book_title)
+        )
+
+
+class LibraryBookActionView(discord.ui.View):
+    """Library dropdown used by book information and review commands."""
+
+    def __init__(
+        self, cog: "BookCommands", action: str, options: List[discord.SelectOption]
+    ):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.action = action
+        self.book_select = discord.ui.Select(
+            placeholder="Choose a book from your library…", options=options
+        )
+        self.book_select.callback = self._select_book
+        self.add_item(self.book_select)
+
+    async def _select_book(self, interaction: discord.Interaction) -> None:
+        book_id = self.book_select.values[0]
+        if self.action in {"review", "rating"}:
+            book = await self.cog.mongo_service.find_one("books", {"id": book_id})
+            await interaction.response.send_modal(
+                ReviewModal(self.cog, book_id, (book or {}).get("title", "Book"))
+            )
+            return
+        await interaction.response.defer(
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL, thinking=True
+        )
+        await self.cog.run_library_action(interaction, self.action, book_id)
+
+
 class BookCommands(
     commands.GroupCog, group_name="book", group_description="Manage books"
 ):
@@ -171,6 +260,136 @@ class BookCommands(
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.mongo_service: MongoService = bot.mongo_service
+
+    async def rating_summary(self, book_id: str) -> tuple[float, int, list[dict]]:
+        """Return the community rating aggregate and review records for a book."""
+        records = await self.mongo_service.find_many("user_books", {"book_id": book_id})
+        reviews = [record for record in records if record.get("rating") is not None]
+        if not reviews:
+            return 0.0, 0, []
+        return sum(record["rating"] for record in reviews) / len(reviews), len(reviews), reviews
+
+    async def save_review(
+        self, interaction: discord.Interaction, book_id: str, rating: int, review: str | None
+    ) -> bool:
+        """Save one completed user's rating and optional review."""
+        user_book = await self.mongo_service.find_one(
+            "user_books", {"user_id": interaction.user.id, "book_id": book_id}
+        )
+        if not user_book or user_book.get("status") != BookStatus.COMPLETED.value:
+            await interaction.followup.send(
+                "You can rate a book after marking it as completed.",
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+            return False
+        await self.mongo_service.update_one(
+            "user_books",
+            {"user_id": interaction.user.id, "book_id": book_id},
+            {"$set": {"rating": rating, "review": review, "reviewed_at": datetime.utcnow()}},
+        )
+        return True
+
+    async def book_info_embed(self, book_id: str) -> discord.Embed | None:
+        """Build the book info card enriched with local community ratings."""
+        book = await self.mongo_service.find_one("books", {"id": book_id})
+        if not book:
+            return None
+        embed = create_book_preview_embed(book)
+        average, count, _ = await self.rating_summary(book_id)
+        rating_text = f"⭐ {average:.1f} ({count} review{'s' if count != 1 else ''})" if count else "No community ratings yet"
+        embed.add_field(name="Community Rating", value=rating_text, inline=False)
+        embed.set_footer(text="Use /book review after completing this book.")
+        return embed
+
+    async def _open_review_modal(
+        self, interaction: discord.Interaction, book_id: str
+    ) -> None:
+        """Open the review editor after confirming that the book exists."""
+        book = await self.mongo_service.find_one("books", {"id": book_id})
+        if not book:
+            await interaction.response.send_message(
+                "Book not found in your library.", ephemeral=COMMAND_RESPONSES_EPHEMERAL
+            )
+            return
+        await interaction.response.send_modal(ReviewModal(self, book_id, book["title"]))
+
+    async def _show_library_selector(
+        self, interaction: discord.Interaction, action: str
+    ) -> None:
+        """Show only the caller's relevant library books for an action."""
+        records = await self.mongo_service.find_many(
+            "user_books", {"user_id": interaction.user.id}, limit=25
+        )
+        if action in {"review", "rating"}:
+            records = [
+                record for record in records
+                if record.get("status") == BookStatus.COMPLETED.value
+            ]
+        elif action == "delete_review":
+            records = [record for record in records if record.get("rating") is not None]
+        if not records:
+            message = {
+                "review": "Complete a book before adding a review.",
+                "rating": "Complete a book before adding a rating.",
+                "delete_review": "You have no reviews to delete.",
+            }.get(action, "You haven't added any books yet.")
+            await interaction.followup.send(
+                message, ephemeral=COMMAND_RESPONSES_EPHEMERAL
+            )
+            return
+        options = []
+        for record in records:
+            book = await self.mongo_service.find_one("books", {"id": record["book_id"]})
+            title = (book or {}).get("title", "Unknown Book")
+            options.append(
+                discord.SelectOption(
+                    label=_truncate(title),
+                    description=_truncate(
+                        record.get("status", "").replace("_", " ").title()
+                    ),
+                    value=record["book_id"],
+                )
+            )
+        await interaction.followup.send(
+            "Choose a book.",
+            view=LibraryBookActionView(self, action, options),
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+        )
+
+    async def run_library_action(
+        self, interaction: discord.Interaction, action: str, book_id: str
+    ) -> None:
+        """Perform an action selected from a library dropdown."""
+        if action == "delete_review":
+            result = await self.mongo_service.update_one(
+                "user_books",
+                {"user_id": interaction.user.id, "book_id": book_id, "rating": {"$ne": None}},
+                {"$unset": {"rating": "", "review": "", "reviewed_at": ""}},
+            )
+            message = "Deleted your review." if result["matched_count"] else "You have no review for this book."
+            await interaction.followup.send(message, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        elif action == "reviews":
+            await self._send_reviews(interaction, book_id)
+        elif action == "info":
+            embed = await self.book_info_embed(book_id)
+            await interaction.followup.send(
+                embed=embed if embed else discord.Embed(description="Book not found."),
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
+            )
+
+    async def _send_reviews(self, interaction: discord.Interaction, book_id: str) -> None:
+        """Send the community review summary for a selected book."""
+        book = await self.mongo_service.find_one("books", {"id": book_id})
+        if not book:
+            await interaction.followup.send("Book not found.", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+            return
+        average, count, reviews = await self.rating_summary(book_id)
+        embed = discord.Embed(title=f"Reviews for {book['title']}", color=discord.Color.gold())
+        embed.description = f"⭐ {average:.1f} from {count} review{'s' if count != 1 else ''}" if count else "No reviews yet."
+        for index, review in enumerate(reviews[:10], 1):
+            text = review.get("review") or "No written review."
+            embed.add_field(name=f"Reader {index} • {'⭐' * review['rating']}", value=_truncate(text, 1_024), inline=False)
+        await interaction.followup.send(embed=embed, ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
     @app_commands.command(name="search", description="Search for books on Google Books")
     @app_commands.describe(query="Search query (title, author, or ISBN)")
@@ -297,7 +516,12 @@ class BookCommands(
                     ),
                     color=discord.Color.green()
                 ),
-                ephemeral=COMMAND_RESPONSES_EPHEMERAL
+                view=(
+                    ReviewPromptView(self, book_id, book_data["title"])
+                    if status == BookStatus.COMPLETED
+                    else None
+                ),
+                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
             )
 
         except Exception as e:
@@ -310,6 +534,36 @@ class BookCommands(
                 ),
                 ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
+
+    @app_commands.command(name="review", description="Add or edit your rating and review")
+    async def review(self, interaction: discord.Interaction) -> None:
+        """Open a review form for a completed library book."""
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await self._show_library_selector(interaction, "review")
+
+    @app_commands.command(name="rating", description="Add or edit a 1–5 star rating")
+    async def rating(self, interaction: discord.Interaction) -> None:
+        """Alias for the review form when only a rating is needed."""
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await self._show_library_selector(interaction, "rating")
+
+    @app_commands.command(name="delete-review", description="Delete your rating and review")
+    async def delete_review(self, interaction: discord.Interaction) -> None:
+        """Delete the caller's review without deleting their library entry."""
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await self._show_library_selector(interaction, "delete_review")
+
+    @app_commands.command(name="reviews", description="View community reviews for a book")
+    async def reviews(self, interaction: discord.Interaction) -> None:
+        """Show ratings and written reviews without exposing Discord user IDs."""
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await self._show_library_selector(interaction, "reviews")
+
+    @app_commands.command(name="info", description="Show book details and community rating")
+    async def info(self, interaction: discord.Interaction) -> None:
+        """Show stored book metadata, cover, synopsis, and community rating."""
+        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
+        await self._show_library_selector(interaction, "info")
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -26,6 +26,8 @@ class UserBook(BaseModel):
         None, ge=1, description="Page count for the user's edition"
     )
     rating: Optional[int] = Field(None, ge=1, le=5)
+    review: Optional[str] = Field(None, max_length=2_000)
+    reviewed_at: Optional[datetime] = Field(None)
     started_at: Optional[datetime] = Field(None)
     completed_at: Optional[datetime] = Field(None)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

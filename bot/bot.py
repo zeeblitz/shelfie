@@ -33,9 +33,7 @@ class ShelfieBot(commands.Bot):
     def __init__(self):
         # Enable intents
         intents = discord.Intents.default()
-        intents.message_content = True
         intents.guilds = True
-        intents.members = True
 
         super().__init__(
             command_prefix="!",
