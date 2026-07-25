@@ -1,5 +1,6 @@
 """Book-related slash commands for Shelfie bot."""
 
+from datetime import datetime
 from typing import Any, Dict, List
 
 import discord
@@ -12,9 +13,9 @@ from bot.models.book import Book
 from bot.models.user_book import BookStatus, UserBook
 from bot.services.book_service import GoogleBooksService
 from bot.services.mongo_service import MongoService
+from bot.utils.cache import Cache
 
 COMMAND_RESPONSES_EPHEMERAL = get_settings().COMMAND_RESPONSES_EPHEMERAL
-from bot.utils.cache import Cache
 
 cache = Cache()
 book_service = GoogleBooksService(cache)
@@ -41,23 +42,125 @@ def create_book_options(results: List[Dict[str, Any]]) -> List[discord.SelectOpt
     return options
 
 
-class SearchResultsView(discord.ui.View):
-    """Dropdown that lets a user add a result directly from a search."""
+def create_search_embed(query: str, results: List[Dict[str, Any]]) -> discord.Embed:
+    """Build the summary embed shown before a book is selected."""
+    embed = discord.Embed(
+        title=f"Search Results for '{query}'", color=discord.Color.blue()
+    )
+    for index, book in enumerate(results, 1):
+        authors = ", ".join(book.get("authors", [])) or "Unknown"
+        pages = book.get("page_count") or "Unknown"
+        publisher = book.get("publisher") or "Unknown"
+        embed.add_field(
+            name=f"{index}. {book['title']}",
+            value=f"by {authors} • {pages} pages\nPublisher: {publisher}",
+            inline=False,
+        )
+    return embed
 
-    def __init__(self, cog: "BookCommands", results: List[Dict[str, Any]]):
+
+def create_book_preview_embed(book: Dict[str, Any]) -> discord.Embed:
+    """Build a rich preview from Google Books metadata."""
+    authors = ", ".join(book.get("authors", [])) or "Unknown author"
+    synopsis = book.get("description") or "No synopsis is available for this book."
+    embed = discord.Embed(
+        title=_truncate(book.get("title") or "Untitled", 256),
+        description=_truncate(synopsis, 4_096),
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="Author", value=_truncate(authors, 1_024), inline=True)
+    embed.add_field(
+        name="Publisher",
+        value=_truncate(book.get("publisher") or "Unknown", 1_024),
+        inline=True,
+    )
+    embed.add_field(
+        name="Pages", value=str(book.get("page_count") or "Unknown"), inline=True
+    )
+    if thumbnail_url := book.get("thumbnail_url"):
+        embed.set_image(url=thumbnail_url)
+    embed.set_footer(text="Choose a reading status to add this book to your library.")
+    return embed
+
+
+class SearchResultsView(discord.ui.View):
+    """Dropdown that opens a preview for a selected search result."""
+
+    def __init__(
+        self, cog: "BookCommands", query: str, results: List[Dict[str, Any]]
+    ):
         super().__init__(timeout=300)
         self.cog = cog
+        self.query = query
+        self.results = results
         self.book_select = discord.ui.Select(
             placeholder="Choose a book to add to your library…",
             options=create_book_options(results),
         )
-        self.book_select.callback = self._add_selected_book
+        self.book_select.callback = self._show_selected_book
         self.add_item(self.book_select)
 
-    async def _add_selected_book(self, interaction: discord.Interaction) -> None:
-        """Add the book selected in the dropdown."""
-        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL, thinking=True)
-        await self.cog.add_book_to_library(interaction, self.book_select.values[0])
+    async def _show_selected_book(self, interaction: discord.Interaction) -> None:
+        """Show the rich preview and status actions for the selected book."""
+        selected_id = self.book_select.values[0]
+        book = next(book for book in self.results if book["id"] == selected_id)
+        await interaction.response.edit_message(
+            embed=create_book_preview_embed(book),
+            view=BookPreviewView(self.cog, self.query, self.results, book),
+        )
+
+
+class BookPreviewView(discord.ui.View):
+    """Preview actions for a selected book."""
+
+    def __init__(
+        self,
+        cog: "BookCommands",
+        query: str,
+        results: List[Dict[str, Any]],
+        book: Dict[str, Any],
+    ):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.query = query
+        self.results = results
+        self.book = book
+
+    async def _add_with_status(
+        self, interaction: discord.Interaction, status: BookStatus
+    ) -> None:
+        """Add the previewed book with the status chosen by the user."""
+        await interaction.response.defer(
+            ephemeral=COMMAND_RESPONSES_EPHEMERAL, thinking=True
+        )
+        await self.cog.add_book_to_library(interaction, self.book["id"], status)
+
+    @discord.ui.button(label="Want to Read", style=discord.ButtonStyle.secondary)
+    async def want_to_read(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._add_with_status(interaction, BookStatus.WANT_TO_READ)
+
+    @discord.ui.button(label="Reading", style=discord.ButtonStyle.primary)
+    async def reading(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._add_with_status(interaction, BookStatus.READING)
+
+    @discord.ui.button(label="Completed", style=discord.ButtonStyle.success)
+    async def completed(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._add_with_status(interaction, BookStatus.COMPLETED)
+
+    @discord.ui.button(label="Back to results", style=discord.ButtonStyle.secondary)
+    async def back_to_results(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await interaction.response.edit_message(
+            embed=create_search_embed(self.query, self.results),
+            view=SearchResultsView(self.cog, self.query, self.results),
+        )
 
 
 class BookCommands(
@@ -88,28 +191,9 @@ class BookCommands(
                 )
                 return
 
-            # Build embed with search results
-            embed = discord.Embed(
-                title=f"Search Results for '{query}'",
-                color=discord.Color.blue()
-            )
-
-            for i, book in enumerate(results, 1):
-                authors = ", ".join(book.get("authors", [])) or "Unknown"
-                pages = book.get("page_count") or "Unknown"
-                publisher = book.get("publisher") or "Unknown"
-                embed.add_field(
-                    name=f"{i}. {book['title']}",
-                    value=(
-                        f"by {authors} • {pages} pages\n"
-                        f"Publisher: {publisher}"
-                    ),
-                    inline=False
-                )
-
             await interaction.followup.send(
-                embed=embed,
-                view=SearchResultsView(self, results),
+                embed=create_search_embed(query, results),
+                view=SearchResultsView(self, query, results),
                 ephemeral=COMMAND_RESPONSES_EPHEMERAL,
             )
 
@@ -125,14 +209,25 @@ class BookCommands(
             )
 
     @app_commands.command(name="add", description="Add a book to your library")
-    @app_commands.describe(book_id="Google Books ID (from /search)")
-    async def add(self, interaction: discord.Interaction, book_id: str) -> None:
+    @app_commands.describe(
+        book_id="Google Books ID (from /search)",
+        status="Reading status to set when adding the book",
+    )
+    async def add(
+        self,
+        interaction: discord.Interaction,
+        book_id: str,
+        status: BookStatus = BookStatus.READING,
+    ) -> None:
         """Add a book to the user's library."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
-        await self.add_book_to_library(interaction, book_id)
+        await self.add_book_to_library(interaction, book_id, status)
 
     async def add_book_to_library(
-        self, interaction: discord.Interaction, book_id: str
+        self,
+        interaction: discord.Interaction,
+        book_id: str,
+        status: BookStatus = BookStatus.READING,
     ) -> None:
         """Add a book by ID after an interaction response has been deferred."""
 
@@ -175,12 +270,14 @@ class BookCommands(
                 return
 
             # Create user book record
+            now = datetime.utcnow()
             user_book = UserBook(
                 user_id=interaction.user.id,
                 book_id=book_id,
-                status=BookStatus.READING,
+                status=status,
                 current_page=0,
-                started_at=None
+                started_at=now if status in (BookStatus.READING, BookStatus.COMPLETED) else None,
+                completed_at=now if status == BookStatus.COMPLETED else None,
             )
             await self.mongo_service.insert_one("user_books", user_book.model_dump())
 
@@ -194,7 +291,10 @@ class BookCommands(
             await interaction.followup.send(
                 embed=discord.Embed(
                     title="Book Added",
-                    description=f"'{book_data['title']}' has been added to your library!",
+                    description=(
+                        f"'{book_data['title']}' has been added to your library "
+                        f"as **{status.value.replace('_', ' ').title()}**!"
+                    ),
                     color=discord.Color.green()
                 ),
                 ephemeral=COMMAND_RESPONSES_EPHEMERAL
@@ -215,4 +315,3 @@ class BookCommands(
 async def setup(bot: commands.Bot) -> None:
     """Load the cog."""
     await bot.add_cog(BookCommands(bot))
-
