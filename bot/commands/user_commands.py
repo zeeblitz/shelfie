@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Optional
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 from bot.config import get_settings
@@ -236,10 +235,8 @@ class LibraryBookValueModal(discord.ui.Modal):
         )
 
 
-class UserCommands(
-    commands.GroupCog, group_name="user", group_description="Manage your library"
-):
-    """Cog for user-related commands."""
+class UserCommands:
+    """Library-action helper used by the ``/book`` command group."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -412,15 +409,17 @@ class UserCommands(
             from bot.commands.book_commands import ReviewPromptView
 
             review_view = ReviewPromptView(self.bot.get_cog("BookCommands"), book_id, book_doc["title"])
-        await interaction.followup.send(
-            embed=discord.Embed(
+        response_kwargs = {
+            "embed": discord.Embed(
                 title="Progress Updated",
                 description=f"Updated progress for '{book_doc['title']}' to page {page}.",
                 color=discord.Color.green(),
             ),
-            view=review_view,
-            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
-        )
+            "ephemeral": COMMAND_RESPONSES_EPHEMERAL,
+        }
+        if review_view:
+            response_kwargs["view"] = review_view
+        await interaction.followup.send(**response_kwargs)
 
     async def _set_page_count(
         self, interaction: discord.Interaction, book_id: str, page_count: int
@@ -484,20 +483,20 @@ class UserCommands(
             from bot.commands.book_commands import ReviewPromptView
 
             review_view = ReviewPromptView(self.bot.get_cog("BookCommands"), book_id, book_doc["title"])
-        await interaction.followup.send(
-            (
+        response_kwargs = {
+            "content": (
                 f"Updated progress for '{book_doc['title']}' to {percentage:g}% "
                 f"(page {page} of {total_pages})."
             ),
-            view=review_view,
-            ephemeral=COMMAND_RESPONSES_EPHEMERAL,
-        )
+            "ephemeral": COMMAND_RESPONSES_EPHEMERAL,
+        }
+        if review_view:
+            response_kwargs["view"] = review_view
+        await interaction.followup.send(**response_kwargs)
 
-    @app_commands.command(name="list", description="List your books")
-    @app_commands.describe(status="Filter by status (e.g., READING, COMPLETED)")
     async def list_books(
-        self, 
-        interaction: discord.Interaction, 
+        self,
+        interaction: discord.Interaction,
         status: Optional[BookStatus] = None
     ) -> None:
         """List the user's books from their library."""
@@ -518,11 +517,13 @@ class UserCommands(
                 return
 
             view = LibraryPaginationView(entries, interaction.user.display_name)
-            await interaction.followup.send(
-                embed=view.current_embed(),
-                view=view if view.total_pages > 1 else None,
-                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
-            )
+            response_kwargs = {
+                "embed": view.current_embed(),
+                "ephemeral": COMMAND_RESPONSES_EPHEMERAL,
+            }
+            if view.total_pages > 1:
+                response_kwargs["view"] = view
+            await interaction.followup.send(**response_kwargs)
 
         except Exception as e:
             logger.error("List books error", error=str(e), user_id=interaction.user.id)
@@ -535,7 +536,6 @@ class UserCommands(
                 ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
-    @app_commands.command(name="progress", description="Update your reading progress")
     async def update_progress(self, interaction: discord.Interaction) -> None:
         """Choose a book, then update its current page."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
@@ -547,9 +547,6 @@ class UserCommands(
             logger.error("Update progress error", error=str(e), user_id=interaction.user.id)
             await interaction.followup.send("An error occurred while updating progress.", ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
-    @app_commands.command(
-        name="edition-pages", description="Set the page count for your edition"
-    )
     async def set_edition_pages(self, interaction: discord.Interaction) -> None:
         """Choose a book, then set the page count for the user's edition."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
@@ -561,7 +558,6 @@ class UserCommands(
                 "Failed to update the page count.", ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
-    @app_commands.command(name="remove", description="Remove a book from your library")
     async def remove_book(self, interaction: discord.Interaction) -> None:
         """Choose and confirm removal of one book from the user's library."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
@@ -591,9 +587,6 @@ class UserCommands(
                 "Failed to load your library.", ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
-    @app_commands.command(
-        name="progress-percent", description="Update reading progress as a percentage"
-    )
     async def update_progress_percent(self, interaction: discord.Interaction) -> None:
         """Choose a book, then update its progress as a percentage."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
@@ -609,14 +602,13 @@ class UserCommands(
                 "An error occurred while updating progress.", ephemeral=COMMAND_RESPONSES_EPHEMERAL
             )
 
-    @app_commands.command(name="stats", description="View your reading statistics")
     async def stats(self, interaction: discord.Interaction) -> None:
         """View your reading statistics."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
 
         try:
             user_books = await self.mongo_service.find_many("user_books", {"user_id": interaction.user.id})
-            
+
             completed_count = len([ub for ub in user_books if ub['status'] == BookStatus.COMPLETED.value])
             reading_count = len([ub for ub in user_books if ub['status'] == BookStatus.READING.value])
             total_pages_read = sum([ub.get('current_page', 0) for ub in user_books])
@@ -637,5 +629,4 @@ class UserCommands(
 
 
 async def setup(bot: commands.Bot) -> None:
-    """Load the cog."""
-    await bot.add_cog(UserCommands(bot))
+    """Retained for extension compatibility; library actions are loaded by BookCommands."""

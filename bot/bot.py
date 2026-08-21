@@ -56,7 +56,6 @@ class ShelfieBot(commands.Bot):
         # Load slash-command cogs. commands.Bot already provides self.tree.
         for extension in (
             "bot.commands.book_commands",
-            "bot.commands.user_commands",
             "bot.commands.config_commands",
         ):
             await self.load_extension(extension)

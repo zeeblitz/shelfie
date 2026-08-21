@@ -69,22 +69,20 @@ Shelfie is a lightweight, Discord-native book tracking bot. It allows members of
 - `/book search <query>`: Search for books on Google Books, then select a result
   from the dropdown to add it to your library.
 - `/book add <book_id>`: Add a book by its Google Books ID (optional fallback).
-- `/book info`: Choose a library book to view its metadata and community rating.
+- `/book details`: Choose a library book to view its metadata and community rating.
 - `/book review`: Choose a completed book to add or edit a rating and review.
-- `/book rating`: Choose a completed book to add or edit a 1–5 star rating.
 - `/book delete-review`: Choose one of your reviewed books to delete its review.
-- `/book reviews`: Choose a library book to view community ratings and reviews.
-
-### User Commands
-- `/user list`: List your books.
-- `/user progress`: Choose a book, then enter the current page.
-- `/user edition-pages`: Choose a book, then set your edition's page count.
-- `/user progress-percent`: Choose a book, then enter progress as a percentage.
-- `/user remove`: Choose and confirm removal of a book from your library.
-- `/user stats`: View your reading statistics.
+- `/book community-reviews`: Choose a library book to view community ratings and reviews.
+- `/book library`: View the books in your library, optionally filtered by status.
+- `/book update-progress`: Choose a book, then enter its current page.
+- `/book set-page-count`: Choose a book, then set your edition's page count.
+- `/book update-progress-percent`: Choose a book, then enter its progress as a percentage.
+- `/book remove-from-library`: Choose and confirm removal of a book from your library.
+- `/book stats`: View your reading statistics.
 
 ### Configuration Commands
-- `/config feed-channel <channel>`: Set or clear the reading feed channel.
+- `/config feed-channel <channel>`: Set or clear the reading feed channel. Requires
+  the **Manage Server** permission.
 
 ## 🛡️ License
 

@@ -14,6 +14,7 @@ from bot.models.user_book import BookStatus, UserBook
 from bot.services.book_service import GoogleBooksService
 from bot.services.mongo_service import MongoService
 from bot.utils.cache import Cache
+from bot.commands.user_commands import UserCommands
 
 COMMAND_RESPONSES_EPHEMERAL = get_settings().COMMAND_RESPONSES_EPHEMERAL
 
@@ -260,6 +261,7 @@ class BookCommands(
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.mongo_service: MongoService = bot.mongo_service
+        self.library_commands = UserCommands(bot)
 
     async def rating_summary(self, book_id: str) -> tuple[float, int, list[dict]]:
         """Return the community rating aggregate and review records for a book."""
@@ -541,29 +543,71 @@ class BookCommands(
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         await self._show_library_selector(interaction, "review")
 
-    @app_commands.command(name="rating", description="Add or edit a 1–5 star rating")
-    async def rating(self, interaction: discord.Interaction) -> None:
-        """Alias for the review form when only a rating is needed."""
-        await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
-        await self._show_library_selector(interaction, "rating")
-
     @app_commands.command(name="delete-review", description="Delete your rating and review")
     async def delete_review(self, interaction: discord.Interaction) -> None:
         """Delete the caller's review without deleting their library entry."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         await self._show_library_selector(interaction, "delete_review")
 
-    @app_commands.command(name="reviews", description="View community reviews for a book")
+    @app_commands.command(
+        name="community-reviews", description="View community reviews for a book"
+    )
     async def reviews(self, interaction: discord.Interaction) -> None:
         """Show ratings and written reviews without exposing Discord user IDs."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         await self._show_library_selector(interaction, "reviews")
 
-    @app_commands.command(name="info", description="Show book details and community rating")
+    @app_commands.command(
+        name="details", description="Show book details and community rating"
+    )
     async def info(self, interaction: discord.Interaction) -> None:
         """Show stored book metadata, cover, synopsis, and community rating."""
         await interaction.response.defer(ephemeral=COMMAND_RESPONSES_EPHEMERAL)
         await self._show_library_selector(interaction, "info")
+
+    @app_commands.command(name="library", description="View the books in your library")
+    @app_commands.describe(status="Filter by status, such as READING or COMPLETED")
+    async def library(
+        self,
+        interaction: discord.Interaction,
+        status: BookStatus | None = None,
+    ) -> None:
+        """List the invoking member's library."""
+        await self.library_commands.list_books(interaction, status)
+
+    @app_commands.command(
+        name="update-progress", description="Update a book's current page"
+    )
+    async def update_progress(self, interaction: discord.Interaction) -> None:
+        """Choose a book and update its current page."""
+        await self.library_commands.update_progress(interaction)
+
+    @app_commands.command(
+        name="set-page-count", description="Set the page count for your edition"
+    )
+    async def set_page_count(self, interaction: discord.Interaction) -> None:
+        """Choose a book and set its edition-specific page count."""
+        await self.library_commands.set_edition_pages(interaction)
+
+    @app_commands.command(
+        name="update-progress-percent",
+        description="Update a book's reading progress as a percentage",
+    )
+    async def update_progress_percent(self, interaction: discord.Interaction) -> None:
+        """Choose a book and update its progress as a percentage."""
+        await self.library_commands.update_progress_percent(interaction)
+
+    @app_commands.command(
+        name="remove-from-library", description="Remove a book from your library"
+    )
+    async def remove_from_library(self, interaction: discord.Interaction) -> None:
+        """Choose and confirm a book to remove from the invoking member's library."""
+        await self.library_commands.remove_book(interaction)
+
+    @app_commands.command(name="stats", description="View your reading statistics")
+    async def stats(self, interaction: discord.Interaction) -> None:
+        """Show reading statistics for the invoking member."""
+        await self.library_commands.stats(interaction)
 
 
 async def setup(bot: commands.Bot) -> None:

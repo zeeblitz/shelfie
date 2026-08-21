@@ -25,9 +25,12 @@ class ConfigCommands(
 
     @app_commands.command(name="feed-channel", description="Set or clear the reading feed channel")
     @app_commands.describe(channel="Text channel for reading feed (or 'none' to disable)")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
     async def set_feed_channel(
-        self, 
-        interaction: discord.Interaction, 
+        self,
+        interaction: discord.Interaction,
         channel: Optional[discord.TextChannel] = None
     ) -> None:
         """Set or clear the reading feed channel for this server."""
@@ -35,11 +38,11 @@ class ConfigCommands(
 
         try:
             guild_id = interaction.guild.id
-            
+
             if channel is None:
                 # Clear feed channel
                 await self.mongo_service.delete_one(
-                    "guild_configs", 
+                    "guild_configs",
                     {"_id": guild_id}
                 )
                 await interaction.followup.send(
@@ -58,7 +61,7 @@ class ConfigCommands(
                 "feed_channel_id": channel.id,
                 "updated_at": datetime.utcnow()
             }
-            
+
             await self.mongo_service.update_one(
                 "guild_configs",
                 {"_id": guild_id},
@@ -90,4 +93,3 @@ class ConfigCommands(
 async def setup(bot: commands.Bot) -> None:
     """Load the cog."""
     await bot.add_cog(ConfigCommands(bot))
-
