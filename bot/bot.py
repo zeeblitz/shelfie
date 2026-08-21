@@ -8,6 +8,7 @@ from discord.ext import commands
 
 from bot.config import get_settings
 from bot.logging import configure_logging, logger
+from bot.middleware.error_handler import on_app_command_error
 from bot.services.mongo_service import MongoService
 
 # Configure logging
@@ -40,6 +41,7 @@ class ShelfieBot(commands.Bot):
             intents=intents,
             help_command=None,  # Disable default help command
         )
+        self.tree.on_error = on_app_command_error
 
         # Setup services
         self.mongo_service = MongoService()

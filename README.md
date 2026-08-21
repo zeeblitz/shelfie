@@ -81,7 +81,9 @@ Shelfie is a lightweight, Discord-native book tracking bot. It allows members of
 - `/book stats`: View your reading statistics.
 
 ### Configuration Commands
-- `/config feed-channel <channel>`: Set or clear the reading feed channel. Requires
+- `/config feed-channel <channel>`: Set the reading feed channel. Requires a channel
+  and the **Manage Server** permission.
+- `/config remove-feed-channel`: Disable reading-feed posts for this server. Requires
   the **Manage Server** permission.
 
 ## 🛡️ License

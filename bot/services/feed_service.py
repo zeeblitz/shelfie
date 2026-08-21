@@ -48,7 +48,16 @@ class FeedService:
             return
 
         channel = self.bot.get_channel(guild_config["feed_channel_id"])
-        if not channel or not isinstance(channel, discord.TextChannel):
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(guild_config["feed_channel_id"])
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Feed channel unavailable",
+                    channel_id=guild_config["feed_channel_id"],
+                )
+                return
+        if not isinstance(channel, (discord.TextChannel, discord.ForumChannel)):
             return
 
         # Build embed
@@ -76,7 +85,12 @@ class FeedService:
 
         # Post to channel
         try:
-            await channel.send(embed=embed)
+            if isinstance(channel, discord.ForumChannel):
+                await channel.create_thread(
+                    name=f"Reading update: {book_title}"[:100], embed=embed
+                )
+            else:
+                await channel.send(embed=embed)
             # Cache the post time
             await cache.set(key, datetime.utcnow(), ttl=3600)
             logger.info("Feed post successful", user_id=user_id, book_id=book_id)
