@@ -507,22 +507,22 @@ class BookCommands(
                 title=book_data['title']
             )
 
-            await interaction.followup.send(
-                embed=discord.Embed(
+            response_kwargs: dict[str, Any] = {
+                "embed": discord.Embed(
                     title="Book Added",
                     description=(
                         f"'{book_data['title']}' has been added to your library "
                         f"as **{status.value.replace('_', ' ').title()}**!"
                     ),
-                    color=discord.Color.green()
+                    color=discord.Color.green(),
                 ),
-                view=(
-                    ReviewPromptView(self, book_id, book_data["title"])
-                    if status == BookStatus.COMPLETED
-                    else None
-                ),
-                ephemeral=COMMAND_RESPONSES_EPHEMERAL,
-            )
+                "ephemeral": COMMAND_RESPONSES_EPHEMERAL,
+            }
+            if status == BookStatus.COMPLETED:
+                response_kwargs["view"] = ReviewPromptView(
+                    self, book_id, book_data["title"]
+                )
+            await interaction.followup.send(**response_kwargs)
 
         except Exception as e:
             logger.error("Add book error", error=str(e), user_id=interaction.user.id)
